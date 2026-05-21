@@ -14,6 +14,7 @@ func Setup(app *fiber.App, db *gorm.DB) {
 	workHandler := handlers.NewWorkHandler(db)
 	galleryHandler := handlers.NewGalleryHandler(db)
 	authHandler := handlers.NewAuthHandler(db)
+	uploadHandler := handlers.NewUploadHandler()
 
 	api := app.Group("/api")
 
@@ -58,4 +59,7 @@ func Setup(app *fiber.App, db *gorm.DB) {
 	admin.Post("/gallery", galleryHandler.Create)
 	admin.Put("/gallery/:id", galleryHandler.Update)
 	admin.Delete("/gallery/:id", galleryHandler.Delete)
+
+	// Image upload → Backblaze B2
+	admin.Post("/upload", uploadHandler.UploadImage)
 }

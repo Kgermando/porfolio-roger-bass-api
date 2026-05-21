@@ -1,22 +1,28 @@
 package handlers
 
 import (
+	"log"
 	"net/mail"
 	"strings"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/kgermando/porfolio-roger-bass-api/internal/models"
+	"github.com/kgermando/porfolio-roger-bass-api/internal/services"
 	"gorm.io/gorm"
 )
 
 // ContactHandler handles contact form requests
 type ContactHandler struct {
-	db *gorm.DB
+	db    *gorm.DB
+	email *services.EmailService
 }
 
 // NewContactHandler creates a new ContactHandler
 func NewContactHandler(db *gorm.DB) *ContactHandler {
-	return &ContactHandler{db: db}
+	return &ContactHandler{
+		db:    db,
+		email: services.NewEmailService(),
+	}
 }
 
 // Create handles POST /api/contact
@@ -67,6 +73,15 @@ func (h *ContactHandler) Create(c *fiber.Ctx) error {
 			"error": "Échec de l'envoi du message",
 		})
 	}
+
+	// Notify admin by email (non-blocking, failure is logged only)
+	go func() {
+		if err := h.email.SendContactNotification(
+			contact.Name, contact.Email, contact.Subject, contact.Message, contact.Phone,
+		); err != nil {
+			log.Printf("Notification email échouée : %v", err)
+		}
+	}()
 
 	return c.Status(fiber.StatusCreated).JSON(fiber.Map{
 		"message": "Message envoyé avec succès",

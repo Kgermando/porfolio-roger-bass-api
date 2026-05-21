@@ -44,7 +44,12 @@ func seedAdmin(db *gorm.DB) {
 	if err := db.Create(&admin).Error; err != nil {
 		log.Printf("Erreur lors du seeding de l'admin: %v", err)
 	} else {
-		log.Printf("Admin créé — username: rogerbass, changer le mot de passe après connexion")
+		log.Println("╔══════════════════════════════════════════════════╗")
+		log.Println("║          SUPER ADMIN créé avec succès            ║")
+		log.Printf("║  Username : %-36s║", admin.Username)
+		log.Printf("║  Password : %-36s║", password)
+		log.Println("║  ⚠  Changez ce mot de passe après la 1re conn.  ║")
+		log.Println("╚══════════════════════════════════════════════════╝")
 	}
 }
 
