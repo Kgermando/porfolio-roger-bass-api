@@ -173,8 +173,20 @@ func (b *BackblazeService) UploadFile(file *multipart.FileHeader, folder string)
 
 	client := &http.Client{Timeout: 60 * time.Second}
 	resp, err := client.Do(req)
-	if err != nil {
-		// Token may have expired — re-authorize and retry once
+
+	// Retry on network error OR on B2 auth/service errors (401, 503)
+	needRetry := err != nil
+	if !needRetry && resp != nil {
+		needRetry = resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusServiceUnavailable
+	}
+	if needRetry {
+		if resp != nil {
+			resp.Body.Close()
+		}
+		// Reset cached upload credentials
+		b.UploadURL = ""
+		b.UploadToken = ""
+		// Re-authorize entirely (covers both expired auth token and expired upload URL)
 		if authErr := b.authorize(); authErr != nil {
 			return "", authErr
 		}
@@ -194,9 +206,13 @@ func (b *BackblazeService) UploadFile(file *multipart.FileHeader, folder string)
 	}
 	defer resp.Body.Close()
 
+	// Always reset upload URL so the next call gets a fresh one
+	b.UploadURL = ""
+	b.UploadToken = ""
+
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		return "", fmt.Errorf("upload B2 échoué: %s", string(body))
+		return "", fmt.Errorf("upload B2 échoué (%d): %s", resp.StatusCode, string(body))
 	}
 
 	fileURL := fmt.Sprintf("%s/file/%s/%s", b.DownloadURL, b.BucketName, filename)

@@ -29,6 +29,7 @@ func main() {
 	app := fiber.New(fiber.Config{
 		AppName:      "Roger Bass API v1.0",
 		ErrorHandler: errorHandler,
+		BodyLimit:    10 * 1024 * 1024, // 10 MB — aligns with the upload handler limit
 	})
 
 	app.Use(recover.New())
