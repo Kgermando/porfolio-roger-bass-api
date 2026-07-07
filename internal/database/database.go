@@ -35,5 +35,7 @@ func AutoMigrate(db *gorm.DB) error {
 		&models.Event{},
 		&models.GalleryPhoto{},
 		&models.Work{},
+		&models.PageView{},
+		&models.Article{},
 	)
 }

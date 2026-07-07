@@ -223,3 +223,86 @@ func (b *BackblazeService) UploadFile(file *multipart.FileHeader, folder string)
 func (b *BackblazeService) UploadImage(file *multipart.FileHeader) (string, error) {
 	return b.UploadFile(file, "images")
 }
+
+// UploadFileWithContentType uploads a file with an explicit content type
+func (b *BackblazeService) UploadFileWithContentType(file *multipart.FileHeader, folder, contentType string) (string, error) {
+	if b.UploadURL == "" || b.UploadToken == "" {
+		if err := b.getUploadURL(); err != nil {
+			return "", err
+		}
+	}
+
+	src, err := file.Open()
+	if err != nil {
+		return "", err
+	}
+	defer src.Close()
+
+	fileBytes, err := io.ReadAll(src)
+	if err != nil {
+		return "", err
+	}
+
+	ext := strings.ToLower(filepath.Ext(file.Filename))
+	filename := fmt.Sprintf("%s/%s%s", folder, uuid.New().String(), ext)
+
+	if contentType == "" {
+		contentType = file.Header.Get("Content-Type")
+	}
+	if contentType == "" {
+		contentType = "application/octet-stream"
+	}
+
+	req, err := http.NewRequest("POST", b.UploadURL, bytes.NewBuffer(fileBytes))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Authorization", b.UploadToken)
+	req.Header.Set("X-Bz-File-Name", filename)
+	req.Header.Set("Content-Type", contentType)
+	req.Header.Set("X-Bz-Content-Sha1", "do_not_verify")
+	req.ContentLength = int64(len(fileBytes))
+
+	client := &http.Client{Timeout: 120 * time.Second}
+	resp, err := client.Do(req)
+
+	needRetry := err != nil
+	if !needRetry && resp != nil {
+		needRetry = resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusServiceUnavailable
+	}
+	if needRetry {
+		if resp != nil {
+			resp.Body.Close()
+		}
+		b.UploadURL = ""
+		b.UploadToken = ""
+		if authErr := b.authorize(); authErr != nil {
+			return "", authErr
+		}
+		if urlErr := b.getUploadURL(); urlErr != nil {
+			return "", urlErr
+		}
+		req2, _ := http.NewRequest("POST", b.UploadURL, bytes.NewBuffer(fileBytes))
+		req2.Header.Set("Authorization", b.UploadToken)
+		req2.Header.Set("X-Bz-File-Name", filename)
+		req2.Header.Set("Content-Type", contentType)
+		req2.Header.Set("X-Bz-Content-Sha1", "do_not_verify")
+		req2.ContentLength = int64(len(fileBytes))
+		resp, err = client.Do(req2)
+		if err != nil {
+			return "", err
+		}
+	}
+	defer resp.Body.Close()
+
+	b.UploadURL = ""
+	b.UploadToken = ""
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return "", fmt.Errorf("upload B2 échoué (%d): %s", resp.StatusCode, string(body))
+	}
+
+	fileURL := fmt.Sprintf("%s/file/%s/%s", b.DownloadURL, b.BucketName, filename)
+	return fileURL, nil
+}
