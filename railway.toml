@@ -1,2 +1,2 @@
 [build]
-buildCommand = "go build -ldflags=\"-w -s\" -o out ./cmd/"
+buildCommand = "go build -ldflags=\"-w -s\" -o out ."
