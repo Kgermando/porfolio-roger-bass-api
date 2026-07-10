@@ -20,10 +20,22 @@ func NewArticleHandler(db *gorm.DB) *ArticleHandler {
 	return &ArticleHandler{db: db}
 }
 
+// articleRequest is the JSON body for create/update (explicit fields avoid BodyParser issues)
+type articleRequest struct {
+	Title       string `json:"title"`
+	Slug        string `json:"slug"`
+	Excerpt     string `json:"excerpt"`
+	Content     string `json:"content"`
+	CoverImage  string `json:"cover_image"`
+	Author      string `json:"author"`
+	IsPublished bool   `json:"is_published"`
+	SortOrder   int    `json:"sort_order"`
+}
+
 // List handles GET /api/articles — published articles (public)
 func (h *ArticleHandler) List(c *fiber.Ctx) error {
 	var articles []models.Article
-	if err := h.db.Where("is_published = ?", true).
+	if err := h.db.Where("is_published IS TRUE").
 		Order("sort_order asc, published_at desc, created_at desc").
 		Find(&articles).Error; err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Erreur serveur"})
@@ -38,7 +50,7 @@ func (h *ArticleHandler) List(c *fiber.Ctx) error {
 func (h *ArticleHandler) GetBySlug(c *fiber.Ctx) error {
 	slug := c.Params("slug")
 	var article models.Article
-	if err := h.db.Where("slug = ? AND is_published = ?", slug, true).First(&article).Error; err != nil {
+	if err := h.db.Where("slug = ? AND is_published IS TRUE", slug).First(&article).Error; err != nil {
 		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "Article introuvable"})
 	}
 	h.db.Model(&article).UpdateColumn("view_count", gorm.Expr("view_count + 1"))
@@ -57,22 +69,32 @@ func (h *ArticleHandler) AdminList(c *fiber.Ctx) error {
 
 // Create handles POST /api/admin/articles
 func (h *ArticleHandler) Create(c *fiber.Ctx) error {
-	var article models.Article
-	if err := c.BodyParser(&article); err != nil {
+	var input articleRequest
+	if err := c.BodyParser(&input); err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Corps invalide"})
 	}
-	if article.Title == "" || article.Content == "" {
+	if input.Title == "" || input.Content == "" {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Titre et contenu requis"})
 	}
+
+	article := models.Article{
+		Title:       input.Title,
+		Excerpt:     input.Excerpt,
+		Content:     input.Content,
+		CoverImage:  input.CoverImage,
+		Author:      input.Author,
+		IsPublished: input.IsPublished,
+		SortOrder:   input.SortOrder,
+	}
 	if article.Slug == "" {
-		article.Slug = slugify(article.Title)
+		article.Slug = slugify(input.Title)
 	} else {
-		article.Slug = slugify(article.Slug)
+		article.Slug = slugify(input.Slug)
 	}
 	if article.Author == "" {
 		article.Author = "Roger Bass"
 	}
-	if article.IsPublished && article.PublishedAt == nil {
+	if article.IsPublished {
 		now := time.Now()
 		article.PublishedAt = &now
 	}
@@ -94,7 +116,7 @@ func (h *ArticleHandler) Update(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "Article introuvable"})
 	}
 
-	var input models.Article
+	var input articleRequest
 	if err := c.BodyParser(&input); err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Corps invalide"})
 	}
@@ -107,10 +129,37 @@ func (h *ArticleHandler) Update(c *fiber.Ctx) error {
 	article.Author = input.Author
 	article.IsPublished = input.IsPublished
 	article.SortOrder = input.SortOrder
+	if input.Author == "" {
+		article.Author = "Roger Bass"
+	}
 	if input.Slug != "" {
 		article.Slug = slugify(input.Slug)
 	}
 	if article.IsPublished && !wasPublished && article.PublishedAt == nil {
+		now := time.Now()
+		article.PublishedAt = &now
+	}
+
+	if err := h.db.Save(&article).Error; err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Erreur lors de la mise à jour"})
+	}
+	return c.JSON(article)
+}
+
+// TogglePublish handles PUT /api/admin/articles/:id/publish — quick publish/unpublish
+func (h *ArticleHandler) TogglePublish(c *fiber.Ctx) error {
+	id, err := strconv.Atoi(c.Params("id"))
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "ID invalide"})
+	}
+
+	var article models.Article
+	if err := h.db.First(&article, id).Error; err != nil {
+		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "Article introuvable"})
+	}
+
+	article.IsPublished = !article.IsPublished
+	if article.IsPublished && article.PublishedAt == nil {
 		now := time.Now()
 		article.PublishedAt = &now
 	}

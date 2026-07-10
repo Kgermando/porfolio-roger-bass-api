@@ -1,6 +1,8 @@
 package handlers
 
 import (
+	"strconv"
+
 	"github.com/gofiber/fiber/v2"
 	"github.com/kgermando/porfolio-roger-bass-api/internal/models"
 	"gorm.io/gorm"
@@ -14,13 +16,46 @@ func NewGalleryHandler(db *gorm.DB) *GalleryHandler {
 	return &GalleryHandler{db: db}
 }
 
-// List returns active photos ordered by sort_order (public)
+// List returns active photos ordered by sort_order (public, paginated)
+// Query params: page (default 1), limit (default 8, max 50)
 func (h *GalleryHandler) List(c *fiber.Ctx) error {
-	var photos []models.GalleryPhoto
-	if err := h.db.Where("is_active = ?", true).Order("sort_order asc, created_at asc").Find(&photos).Error; err != nil {
+	page, err := strconv.Atoi(c.Query("page", "1"))
+	if err != nil || page < 1 {
+		page = 1
+	}
+	limit, err := strconv.Atoi(c.Query("limit", "8"))
+	if err != nil || limit < 1 || limit > 50 {
+		limit = 8
+	}
+	offset := (page - 1) * limit
+
+	base := h.db.Model(&models.GalleryPhoto{}).Where("is_active = ?", true)
+
+	var total int64
+	if err := base.Count(&total).Error; err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Erreur serveur"})
 	}
-	return c.JSON(photos)
+
+	var photos []models.GalleryPhoto
+	if err := base.Order("sort_order asc, created_at asc").Limit(limit).Offset(offset).Find(&photos).Error; err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Erreur serveur"})
+	}
+	if photos == nil {
+		photos = []models.GalleryPhoto{}
+	}
+
+	pages := int(total) / limit
+	if int(total)%limit != 0 {
+		pages++
+	}
+
+	return c.JSON(fiber.Map{
+		"data":  photos,
+		"total": total,
+		"page":  page,
+		"limit": limit,
+		"pages": pages,
+	})
 }
 
 // AdminList returns all photos including inactive (protected)
