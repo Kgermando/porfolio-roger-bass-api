@@ -18,7 +18,10 @@ func NewGalleryHandler(db *gorm.DB) *GalleryHandler {
 
 // List returns active photos ordered by sort_order (public, paginated)
 // Query params: page (default 1), limit (default 8, max 50)
+// Without page/limit params, returns a plain array for backward compatibility
 func (h *GalleryHandler) List(c *fiber.Ctx) error {
+	paginated := c.Query("page") != "" || c.Query("limit") != ""
+
 	page, err := strconv.Atoi(c.Query("page", "1"))
 	if err != nil || page < 1 {
 		page = 1
@@ -37,16 +40,27 @@ func (h *GalleryHandler) List(c *fiber.Ctx) error {
 	}
 
 	var photos []models.GalleryPhoto
-	if err := base.Order("sort_order asc, created_at asc").Limit(limit).Offset(offset).Find(&photos).Error; err != nil {
+	query := base.Order("sort_order asc, created_at asc")
+	if paginated {
+		query = query.Limit(limit).Offset(offset)
+	}
+	if err := query.Find(&photos).Error; err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Erreur serveur"})
 	}
 	if photos == nil {
 		photos = []models.GalleryPhoto{}
 	}
 
+	if !paginated {
+		return c.JSON(photos)
+	}
+
 	pages := int(total) / limit
 	if int(total)%limit != 0 {
 		pages++
+	}
+	if pages < 1 {
+		pages = 1
 	}
 
 	return c.JSON(fiber.Map{
